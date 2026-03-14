@@ -3,19 +3,6 @@ Notes: I removed our saved model (pkl file and bert model) because it was too la
 ## Project Structure (Claude Code)
 
 
-sentiment_svm_transformer/
-├── data/
-│   ├── amazon_test_2500.xlsx       # Source data (2,500 Amazon reviews)
-│   ├── amazon_reviews.db           # SQLite DB for transformer pipeline
-│   └── corporate_data_warehouse.db # SQLite DB for SVM pipeline
-├── app/
-│   ├── config.py                   # Path/env config (DB paths, model dirs)
-│   ├── transformer_sentiment.py    # DistilBERT: full train + evaluate pipeline
-│   ├── transformer_predict.py      # DistilBERT: inference-only on customer data
-│   ├── svm_sentiment.py            # TF-IDF + LinearSVC train + evaluate pipeline
-│   ├── main_sentiment.py           # Streamlit UI (model selection + predictions)
-│   └── database_sentimentanalysis.py # ETL: Excel → SQLite
-└── pyproject.toml
 
 
 
