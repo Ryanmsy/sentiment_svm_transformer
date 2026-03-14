@@ -38,20 +38,25 @@ class SVMSentimentModel:
             self.vectorizer, self.model = pickle.load(f)
             print("load_model worked")
 
+    _ALLOWED_TABLES = {"reviews"}
+
     def load_dataset_from_db(self, table_name: str = "reviews"):
         """
         Connects to SQLite database and executes a SQL query to fetch data.
         """
+        if table_name not in self._ALLOWED_TABLES:
+            raise ValueError(f"Invalid table_name '{table_name}'. Allowed: {self._ALLOWED_TABLES}")
+
         if not os.path.exists(self.db_filepath):
              raise FileNotFoundError(f"Database file not found at {self.db_filepath}. Did you run database_sentimentanalysis.py?")
 
         try:
             print(f"Connecting to Data Warehouse: {self.db_filepath}...")
             conn = sqlite3.connect(self.db_filepath)
-            
+
             query = f"""
-                SELECT text, rating 
-                FROM {table_name} 
+                SELECT text, rating
+                FROM {table_name}
                 WHERE text IS NOT NULL
             """
 
@@ -172,14 +177,30 @@ class SVMSentimentModel:
         except Exception as e:
             raise RuntimeError(f"Prediction failed: {e}")
 
+    def predict_with_confidence(self, text: str):
+        if self.model is None:
+            raise ValueError("Model must be trained before prediction.")
+
+        try:
+            vectorized = self.vectorizer.transform([text])
+            pred = self.model.predict(vectorized)[0]
+            score = self.model.decision_function(vectorized)[0]
+            confidence = 1 / (1 + np.exp(-abs(score)))
+            label = "Positive" if pred == 1 else "Negative"
+            return label, confidence
+
+        except Exception as e:
+            raise RuntimeError(f"Prediction failed: {e}")
+
 # FIX 3: Wrap execution code so it doesn't run when imported by app.py
 if __name__ == "__main__":
-    # 1. Define DB path
-    db_path = "corporate_data_warehouse.db"
+    from pathlib import Path as _Path
+    # 1. Define DB path anchored to this file's directory
+    db_path = str(_Path(__file__).resolve().parent / "corporate_data_warehouse.db")
 
     # 2. Check if DB exists
     if not os.path.exists(db_path):
-        print("⚠️ WARNING: Database not found. Please run 'database_sentimentanalysis.py' first.")
+        print(" WARNING: Database not found. Please run 'database_sentimentanalysis.py' first.")
     else:
         # 3. Instantiate and Run
         # FIX 4: Use the correct parameter name (db_filepath)

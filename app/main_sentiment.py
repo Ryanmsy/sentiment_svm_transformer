@@ -1,23 +1,19 @@
 import streamlit as st
 import sqlite3
-import time
 import os
 
 # --- IMPORT MODELS ---
 try:
     from svm_sentiment import SVMSentimentModel
-    from transformer_sentiment import SentimentModel as TransformerModel
+    from transformer_predict import TransformerPredictor as TransformerModel
+    from config import DB_LOGS, DB_WAREHOUSE, SVM_MODEL_PATH, BERT_MODEL_DIR
 except ImportError as e:
     st.error(f"Missing model files: {e}")
     st.stop()
 
-# --- CONFIG ---
-DB_LOGS_NAME = "production_logs.db"
-DB_WAREHOUSE = "corporate_data_warehouse.db"
-
-# --- DATABASE SETUP (Kept hidden in background) ---
+# --- DATABASE SETUP ---
 def init_log_db():
-    conn = sqlite3.connect(DB_LOGS_NAME)
+    conn = sqlite3.connect(DB_LOGS)
     c = conn.cursor()
     c.execute('''
         CREATE TABLE IF NOT EXISTS prediction_logs (
@@ -32,77 +28,121 @@ def init_log_db():
     conn.close()
 
 def log_prediction(model_name, text, pred):
-    conn = sqlite3.connect(DB_LOGS_NAME)
+    conn = sqlite3.connect(DB_LOGS)
     c = conn.cursor()
-    c.execute("INSERT INTO prediction_logs (model_version, input_text, prediction_label) VALUES (?, ?, ?)",
-              (model_name, text, pred))
+    c.execute(
+        "INSERT INTO prediction_logs (model_version, input_text, prediction_label) VALUES (?, ?, ?)",
+        (model_name, text, pred)
+    )
     conn.commit()
     conn.close()
 
-# Initialize DB on load
 init_log_db()
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="Sentiment Analyzer")
+st.set_page_config(page_title="Sentiment Analyzer", layout="wide")
 
 # --- SIDEBAR ---
 st.sidebar.header("Settings")
 model_choice = st.sidebar.selectbox(
     "Choose Model",
-    ["SVM (Fast)", "DistilBERT (Accurate)"]
+    ["SVM (Fast)", "DistilBERT (Accurate)", "Compare Both"]
 )
+
+st.sidebar.divider()
+st.sidebar.markdown("""
+**About this project**
+
+Two sentiment models trained on Amazon product reviews:
+
+- **SVM** — TF-IDF features + LinearSVC. Fast, lightweight, interpretable.
+- **DistilBERT** — Fine-tuned transformer. Slower but captures context and nuance.
+
+The Compare view runs both simultaneously so you can see where they agree or disagree.
+""")
 
 # --- LOAD MODELS ---
 @st.cache_resource
 def get_svm_model():
     model = SVMSentimentModel(db_filepath=DB_WAREHOUSE)
-    if os.path.exists("svm_model.pkl"):
-        model.load_model("svm_model.pkl")
+    if os.path.exists(SVM_MODEL_PATH):
+        model.load_model(SVM_MODEL_PATH)
         return model
     return None
 
 @st.cache_resource
 def get_transformer_model():
-    model = TransformerModel()
-    if os.path.exists("./bert_model_saved"):
-        model.load_saved_model("./bert_model_saved")
+    try:
+        model = TransformerModel()
+        model.load_saved_model(BERT_MODEL_DIR)
         return model
-    return None
+    except Exception:
+        return None
+
+# --- HELPER: render a single model result ---
+def render_result(label, confidence):
+    if label == "Positive":
+        st.success(f"**{label}**")
+    else:
+        st.error(f"**{label}**")
+    st.progress(confidence, text=f"Confidence: {confidence:.1%}")
 
 # --- MAIN UI ---
-st.title(" Sentiment Analyzer")
+st.title("Sentiment Analyzer")
 st.write("Enter text below to detect if the sentiment is Positive or Negative.")
 
-# Input Area
-user_text = st.text_area("Input Text", height=150, placeholder="e.g., I absolutely loved this product!")
+user_text = st.text_area(
+    "Input Text", height=150,
+    placeholder="e.g., I absolutely loved this product!"
+)
 
-# Action Button
 if st.button("Analyze", type="primary", use_container_width=True):
     if not user_text:
         st.warning("Please type something first.")
     else:
-        prediction = None
-        
-        # Run Inference
-        with st.spinner("Analyzing..."):
-            if "SVM" in model_choice:
-                model = get_svm_model()
-                if model: prediction = model.predict(user_text)
-                else: st.error("SVM Model not found.")
-            
-            elif "DistilBERT" in model_choice:
-                model = get_transformer_model()
-                if model: prediction = model.predict(user_text)
-                else: st.error("Transformer Model not found.")
+        st.divider()
 
-        # Display Result
-        if prediction:
-            # Log to DB silently
-            log_prediction(model_choice, user_text, prediction)
+        if model_choice == "Compare Both":
+            col1, col2 = st.columns(2)
 
-            # Visual Output
-            st.divider()
-            if prediction == "Positive":
-                st.success(f"**Result: {prediction}")
+            with col1:
+                st.subheader("SVM (Fast)")
+                with st.spinner("Running SVM..."):
+                    svm = get_svm_model()
+                if svm:
+                    label, conf = svm.predict_with_confidence(user_text)
+                    render_result(label, conf)
+                    log_prediction("SVM (Fast)", user_text, label)
+                else:
+                    st.error("SVM model file not found. Run `svm_sentiment.py` to train and save it.")
+
+            with col2:
+                st.subheader("DistilBERT (Accurate)")
+                with st.spinner("Running DistilBERT..."):
+                    transformer = get_transformer_model()
+                if transformer:
+                    label, conf = transformer.predict_with_confidence(user_text)
+                    render_result(label, conf)
+                    log_prediction("DistilBERT (Accurate)", user_text, label)
+                else:
+                    st.error("Transformer model failed to load.")
+
+        elif "SVM" in model_choice:
+            with st.spinner("Analyzing..."):
+                svm = get_svm_model()
+            if svm:
+                label, conf = svm.predict_with_confidence(user_text)
+                render_result(label, conf)
+                log_prediction(model_choice, user_text, label)
             else:
-                st.error(f"**Result: {prediction}")
+                st.error("SVM model file not found. Run `svm_sentiment.py` to train and save it.")
+
+        elif "DistilBERT" in model_choice:
+            with st.spinner("Analyzing..."):
+                transformer = get_transformer_model()
+            if transformer:
+                label, conf = transformer.predict_with_confidence(user_text)
+                render_result(label, conf)
+                log_prediction(model_choice, user_text, label)
+            else:
+                st.error("Transformer model failed to load.")

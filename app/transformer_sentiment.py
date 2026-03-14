@@ -8,7 +8,7 @@ import torch
 import os
 import openpyxl
 import sklearn
-
+from pathlib import Path
 
 from transformers import (
     AutoTokenizer,
@@ -18,15 +18,21 @@ from transformers import (
     Trainer
 )
 
+
+
+basepath = Path(__file__).resolve().parent.parent
+source_file = basepath / 'data' / "amazon_test_2500.xlsx"
+db_name = basepath / 'data' / "amazon_reviews.db"
+
 # --- HELPER: Ingest Excel into SQLite ---
-def ingest_excel_to_sqlite(source_file="amazon_test_2500.xlsx", db_name="amazon_reviews.db"):
+def ingest_excel_to_sqlite(source_file=source_file, db_name=db_name):
     """
     Reads the Excel file and saves it into a SQLite database table.
     """
     if os.path.exists(db_name):
         print(f"Database '{db_name}' already exists. Skipping ingestion to avoid overwriting.")
         return
-
+    print(basepath)
     print(f"Reading file: {source_file}...")
     try:
         # Try reading as Excel first (since user specified .xlsx)
@@ -34,7 +40,7 @@ def ingest_excel_to_sqlite(source_file="amazon_test_2500.xlsx", db_name="amazon_
     except Exception:
         # Fallback to CSV if the user actually has a CSV
         print("Excel read failed, trying CSV format...")
-        df = pd.read_csv(source_file.replace(".xlsx", ".csv"))
+        df = pd.read_csv(str(source_file).replace(".xlsx", ".csv"))
 
     # Cleanup: Remove index columns if they exist
     if "Unnamed: 0" in df.columns:
@@ -73,8 +79,7 @@ class SentimentModel:
         self.model = None
         self.training_args = None
         self.trainer = None
-
-        # Add inside class SentimentModel in transformer_sentiment.py
+        self.accuracy_metric = evaluate.load("accuracy")
 
     def save_model(self, output_dir="./bert_model_saved"):
         """Saves the model and tokenizer to a folder."""
@@ -86,14 +91,13 @@ class SentimentModel:
             print("No model to save! Train it first.")
 
     def load_saved_model(self, source_dir="./bert_model_saved"):
-        """Loads a pre-trained model from a folder."""
-        from transformers import AutoTokenizer, AutoModelForSequenceClassification
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(source_dir)
-            self.model = AutoModelForSequenceClassification.from_pretrained(source_dir)
-            print("Saved BERT model loaded successfully.")
-        except OSError:
-            print("Saved model not found. Please train and save first.")
+        """Loads from a local folder; falls back to HuggingFace Hub if not found."""
+        source = source_dir if os.path.exists(source_dir) else self.checkpoint
+        if source == self.checkpoint:
+            print(f"Local model not found at '{source_dir}'. Loading from HuggingFace Hub: {self.checkpoint}")
+        self.tokenizer = AutoTokenizer.from_pretrained(source)
+        self.model = AutoModelForSequenceClassification.from_pretrained(source)
+        print(f"Model loaded from: {source}")
 
     # 1. Load Dataset (FROM SQLITE)
     def load_dataset(self):
@@ -157,7 +161,7 @@ class SentimentModel:
     # 4. Tokenization
     def tokenize_function(self, batch: Dict[str, List[Any]]):
         texts = [str(t) if t else "" for t in batch["reviewText"]]
-        return self.tokenizer(texts, padding="max_length", truncation=True)
+        return self.tokenizer(texts, truncation=True)
 
     def tokenization(self):
         print("Tokenizing...")
@@ -194,12 +198,9 @@ class SentimentModel:
 
     # 8. Metrics
     def compute_metrics(self, eval_pred):
-        
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
-        accuracy = evaluate.load("accuracy")
-        print("step 8 metrics complete")
-        return accuracy.compute(predictions=preds, references=labels)
+        return self.accuracy_metric.compute(predictions=preds, references=labels)
 
     # 9. Trainer
     def create_trainer(self):
@@ -219,7 +220,7 @@ class SentimentModel:
             args=self.training_args,
             train_dataset=self.dataset_splits["train"],
             eval_dataset=self.dataset_splits["test"],
-            tokenizer=self.tokenizer,
+            processing_class=self.tokenizer,
             data_collator=self.data_collator,
             compute_metrics=self.compute_metrics,
         )
@@ -238,19 +239,31 @@ class SentimentModel:
         inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
         device = self.model.device
         inputs = {k: v.to(device) for k, v in inputs.items()}
-        
+
         outputs = self.model(**inputs)
         prediction = torch.argmax(outputs.logits, dim=-1).item()
         return "Positive" if prediction == 1 else "Negative"
+
+    def predict_with_confidence(self, text: str):
+        inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
+        device = self.model.device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        outputs = self.model(**inputs)
+        probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
+        pred = torch.argmax(probs, dim=-1).item()
+        confidence = probs[0][pred].item()
+        label = "Positive" if pred == 1 else "Negative"
+        return label, confidence
 
 
 def main():
     # 1. Ingest Data (Excel -> SQLite)
     # Ensure 'amazon_test_2500.xlsx' is in the same folder
-    ingest_excel_to_sqlite(source_file="amazon_test_2500.xlsx", db_name="amazon_reviews.db")
+    ingest_excel_to_sqlite(source_file=source_file, db_name=db_name)
 
     # 2. Run Pipeline
-    model = SentimentModel(db_path="amazon_reviews.db")
+    model = SentimentModel(db_path= db_name)
 
     model.load_dataset()
     model.load_tokenizer()
