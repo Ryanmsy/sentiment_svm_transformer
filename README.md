@@ -1,6 +1,11 @@
 Notes: I removed our saved model (pkl file and bert model) because it was too large. Will find a solution.
 
-## Project Structure (Claude Code)
+## Project
+Dataset: Amazon customer review data.
+
+Algorithms: Support Vector Machine (SVM) and Transformer models.
+
+Objective: To showcase the difference SVM and Transformers on text sentiments. 
 
 
 
