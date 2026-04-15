@@ -1,50 +1,19 @@
-Notes: I removed our saved model (pkl file and bert model) because it was too large. Will find a solution.
+# Sentiment Analysis: SVM vs. Transformer
 
-## Project
-Dataset: Amazon customer review data.
+A  **Streamlit** web application demonstrating binary sentiment classification on Amazon product reviews. This project compares the trade-offs in speed and accuracy between classical Machine Learning (**SVM**) and Deep Learning (**DistilBERT**).
 
-Algorithms: Support Vector Machine (SVM) and Transformer models.
+## Tech Stack
+* **NLP & Machine Learning:** Scikit-learn, TF-IDF, HuggingFace Transformers, DistilBERT, Fine-tuning
+* **Infrastructure & Data:** Python 3.14+, SQLite, ETL, Docker
+* **Frontend:** Streamlit
 
-Objective: To showcase the difference SVM and Transformers on text sentiments. 
+## Models Compared
 
+| Feature | SVM (Baseline) | DistilBERT (Transformer) |
+| :--- | :--- | :--- |
+| **Tech** | `LinearSVC` + TF-IDF (50k features) | `distilbert-base-uncased-finetuned-sst-2` |
+| **Pros** | Lightweight, near-instant inference | High accuracy, captures semantic context/nuance |
+| **Cons** | No semantic understanding | Slower inference (~100s of ms), heavier resource cost |
+| **Output**| Label + Confidence (Sigmoid) | Label + Confidence (Softmax) |
 
-
-
-
-
-## What would we do differently? - Scaling at enterprise level
-
-### 1. Distributed Data Processing
-* Issue: Our initial prototype relied on Pandas, which processes data in memory on a single machine. At a large scale like Walmart, this would cause memory errors and slow performance because the entire dataset must fit into a single machine.
-
-
-* Future Improvement:
-We would replace Pandas with Apache Spark. Spark uses a "MapReduce" feature to split the dataset into chunks and process them in parallel across a cluster of machines.
-
-
-### 2. Container Orchestration (Kubernetes) 
-* Issue: Docker can containerized our application, but if there are multiple containers, it can be insufficient or difficult to manage. If the single container crashes or receives 10000 requests per second, the container will break.
-
-* Future Improvement:
-Kubernetes: We would deploy our Docker containers into Kubernetes cluster. It will manages the containers.
-
-
-
-### 3.Containerization Strategy 
-* Issue: Compatibility issues with CPU architectures between OS (ARM Macs and x86-based Windows machines).
-
-* Future Improvement:
-We would implement multiple containers using docker buildx. This allows us to push a single image tag that works on both ARM64 and AMD64 hardware to solve "it works on my machine" problem.
-
-
-### 4. Implementation of MLOps Pipeline
-* Issue: Our workflow has no separation between  training data and  inference code.
-
-* Future Improvement:
-We would establish a CI/CD pipeline:
-
-Data Stage (Spark): Raw data is processed and features are stored in a Feature Store.
-
-Training (Dev): Model is trained and artifacts are versioned.
-
-Inference: Only the saved model weights and scoring script are deployed to the production cluster.
+*Data Source: 2,500 Amazon reviews (1-2 stars = Negative, 4-5 stars = Positive). Ingested via a custom SQLite ETL layer.*
